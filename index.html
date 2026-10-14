@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LeFlow: Generative Latent Flow Planning for World Models</title>
+  <meta name="description" content="LeFlow amortizes planning for latent world models: a rectified-flow planner generates goal-conditioned latent paths, an inverse dynamics decoder turns them into actions, and the frozen world model reranks candidates by rollout. Up to 14.4x faster than CEM with higher success.">
+  <meta property="og:title" content="LeFlow: Generative Latent Flow Planning for World Models">
+  <meta property="og:description" content="Amortized latent planning for world models: higher success than CEM at an order-of-magnitude lower planning time.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://hsiangwei0903.github.io/LeFlow-website/">
+  <meta property="og:image" content="https://hsiangwei0903.github.io/LeFlow-website/assets/method.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <a class="skip-link" href="#abstract">Skip to abstract</a>
+
+  <header class="publication-header container">
+    <h1><span class="project-name">LeFlow</span>: Generative Latent Flow Planning for World Models</h1>
+
+    <div class="publication-authors">
+      <span class="author"><a href="https://hsiangwei0903.github.io/">Hsiang-Wei Huang</a></span>
+      <span class="author"><a>Jianxu Shangguan</a></span>
+      <span class="author"><a>Junbin Lu</a></span>
+      <span class="author"><a href="https://people.ece.uw.edu/hwang/">Jenq-Neng Hwang</a></span>
+    </div>
+    <div class="publication-affiliations">
+      <span>University of Washington</span>
+    </div>
+
+    <div class="publication-links">
+      <a class="publication-button" href="https://arxiv.org/pdf/2608.24855">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+        Paper
+      </a>
+      <a class="publication-button" href="https://arxiv.org/abs/2608.24855">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4l16 16M20 4L4 20"/></svg>
+        arXiv
+      </a>
+      <a class="publication-button" href="https://github.com/hsiangwei0903/LeFlow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg>
+        Code
+      </a>
+    </div>
+
+    <nav class="section-nav" aria-label="Sections">
+      <a href="#abstract">Abstract</a>
+      <a href="#method">Method</a>
+      <a href="#efficiency">Efficiency</a>
+      <a href="#results">Results</a>
+      <a href="#qualitative">Rollouts</a>
+      <a href="#citation">Citation</a>
+    </nav>
+  </header>
+
+  <section class="teaser-section container" id="overview">
+    <figure class="teaser-figure">
+      <button class="figure-button" type="button" data-zoom="./assets/method.png" data-alt="LeFlow architecture diagram">
+        <img src="./assets/method.png" alt="LeFlow architecture. Frozen LeWM encoders map the current and goal observations to latents z0 and zH. A trainable latent flow planner generates N latent plans z0 to zH, and a trainable decoder turns each latent transition into an action." width="2400" height="785">
+        <span class="figure-zoom" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg></span>
+      </button>
+      <figcaption>
+        <strong>Plan by generating where to go, not by searching over what to do.</strong>
+        LeFlow sits on a <em>frozen</em> latent world model (LeWM). It learns a reusable latent trajectory prior
+        offline, then at test time samples latent paths between the current and goal embeddings, decodes them into
+        actions, and lets the world model pick the best one.
+      </figcaption>
+    </figure>
+
+    <div class="stat-row" role="list">
+      <div class="stat" role="listitem">
+        <span class="stat-label">Faster than LeWM + CEM</span>
+        <span class="stat-value">4.5–14.4×</span>
+        <span class="stat-note">end-to-end evaluation time</span>
+      </div>
+      <div class="stat" role="listitem">
+        <span class="stat-label">Benchmarks with best success</span>
+        <span class="stat-value">4 / 4</span>
+        <span class="stat-note">TwoRoom, PushT, Reacher, OGBench-Cube</span>
+      </div>
+      <div class="stat" role="listitem">
+        <span class="stat-label">Gain over LeWM + CEM</span>
+        <span class="stat-value">+5.9 to +26.7</span>
+        <span class="stat-note">success-rate points</span>
+      </div>
+      <div class="stat" role="listitem">
+        <span class="stat-label">World model changes</span>
+        <span class="stat-value">None</span>
+        <span class="stat-note">LeWM stays frozen</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section abstract-section" id="abstract">
+    <div class="reading-container">
+      <h2>Abstract</h2>
+      <p>
+        Latent world models are inherently strong encoders that transform image pixel to latent embedding, yet
+        existing world models still rely on online trajectory optimization for action planning: for every
+        state–goal pair, an iterative optimizer is run from scratch to search for optimal action sequences, treating
+        the world model as a black-box simulator. This approach pays the full iterative optimization cost anew at
+        every replanning step and reuses no planning experience across queries. In this work, we ask whether
+        planning itself can be amortized once a latent world model has been learned. We present
+        <strong>LeFlow</strong>, which learns a <strong>reusable latent trajectory prior</strong> operating directly
+        in the latent dynamics space from the world model. LeFlow recasts planning as conditional latent trajectory
+        generation: a rectified-flow model imagines a future latent path between the current and goal embeddings,
+        an inverse dynamics decoder turns latent transitions into action chunks, and the frozen world model verifies
+        each candidate by autoregressive rollout. Across four major goal-conditioned pixel-control benchmarks, LeFlow
+        replaces iterative action-space optimization with amortized latent planning and fixed-budget rollout
+        selection, achieving <strong>consistent success-rate gains with an order-of-magnitude reduction in planning
+        time</strong>. Our results argue that latent world models should support not only prediction but reusable
+        planning priors.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="method">
+    <div class="container">
+      <h2>Method</h2>
+      <p class="section-intro">Plan in latent state space, decode actions afterwards, verify with the world model.</p>
+
+      <div class="reading-container prose">
+        <p>
+          World models such as LeWM plan with the Cross-Entropy Method: for every state–goal pair they search over raw
+          action sequences from scratch, querying the world model thousands of times per replanning step and reusing
+          nothing across queries. Action sequences are low-level and highly multimodal, since many of them realize
+          nearly the same state trajectory. Latent state trajectories are smoother and already organized by the
+          world model's encoder, so LeFlow learns its planning prior in that space instead.
+        </p>
+      </div>
+
+      <div class="component-grid">
+        <article class="component">
+          <span class="component-index">1</span>
+          <h3>Latent flow planner</h3>
+          <p>
+            A conditional rectified-flow model generates the interior of a latent path whose endpoints are clamped to
+            <span class="math">$z_{\text{start}}$</span> and <span class="math">$z_{\text{goal}}$</span>. Its
+            near-straight transport needs only 16 Euler steps, and <span class="math">$N{=}64$</span> candidates are
+            sampled in parallel.
+          </p>
+        </article>
+        <article class="component">
+          <span class="component-index">2</span>
+          <h3>Inverse dynamics decoder</h3>
+          <p>
+            A lightweight MLP maps each latent transition, together with its displacement, to an executable action
+            chunk: <span class="math">$a_t = g_\omega([z_t,\, z_{t+1},\, z_{t+1}-z_t])$</span>. The planner decides
+            <em>where</em> to go; the decoder decides <em>how</em>.
+          </p>
+        </article>
+        <article class="component">
+          <span class="component-index">3</span>
+          <h3>Rollout reranking</h3>
+          <p>
+            Each decoded action sequence is rolled out through the frozen LeWM predictor. The candidate whose
+            <em>actual</em> rollout lands closest to the goal is executed. This projects generated paths back onto the
+            latent manifold the world model can actually control.
+          </p>
+        </article>
+      </div>
+
+      <figure class="paper-figure narrow-figure">
+        <button class="figure-button" type="button" data-zoom="./assets/rerank.png" data-alt="Rollout reranking diagram">
+          <img src="./assets/rerank.png" alt="Rollout reranking. Planned actions a0, a1 are rolled out autoregressively through the LeWM predictor from z0 to produce rollout latents z1 through zH; the reranking score compares zH with z_goal." width="1600" height="612" loading="lazy">
+          <span class="figure-zoom" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M11 8v6M8 11h6"/></svg></span>
+        </button>
+        <figcaption>
+          <strong>Rollout reranking projects generative proposals onto the controllable latent manifold.</strong>
+          Generated interiors may pass through latent states no admissible action reaches. Each candidate is decoded
+          into actions and rolled out through the frozen LeWM predictor, then scored by
+          <span class="math">$\lVert \hat z_H^{(i)} - z_{\text{goal}} \rVert_2^2$</span>; the lowest score is executed.
+        </figcaption>
+      </figure>
+
+      <div class="objective">
+        <h3>Training objective</h3>
+        <p>
+          LeWM stays frozen. Only the flow planner <span class="math">$v_\psi$</span> and the decoder
+          <span class="math">$g_\omega$</span> are trained, jointly, on offline trajectories:
+        </p>
+        <div class="equation">$$\mathcal{L} = \mathcal{L}_{\text{flow}} + \mathcal{L}_{\text{inv}} + \lambda_{\text{cons}}\,\mathcal{L}_{\text{cons}}, \qquad \mathcal{L}_{\text{cons}} = \mathbb{E}\,\big\lVert \mathrm{pred}_\phi(z_t, \hat a_t) - z_{t+1} \big\rVert_2^2$$</div>
+        <p>
+          The consistency term decodes each generated transition, rolls it one step through the frozen predictor and
+          penalizes the gap. This distills the world model's dynamics into the planner at training time, while reranking
+          selects among samples at inference. A small weight (<span class="math">$\lambda_{\text{cons}}{=}0.1$</span>) is
+          enough; a large one collapses diversity onto the predictor's one-step behavior.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section evaluation-section" id="efficiency">
+    <div class="container">
+      <h2>An order of magnitude faster, at higher success</h2>
+      <p class="section-intro">Same frozen LeWM backbone, same protocol (H = 5, 50 episodes). Hover a bar for exact values.</p>
+
+      <div class="viz-root">
+        <div class="chart-legend" aria-hidden="true">
+          <span><i class="swatch" style="background: var(--series-1)"></i>LeWM + CEM</span>
+          <span><i class="swatch" style="background: var(--series-2)"></i>LeFlow (ours)</span>
+        </div>
+        <div class="chart-grid">
+          <figure class="chart-card">
+            <figcaption class="chart-title">End-to-end evaluation time (s)</figcaption>
+            <div class="chart" id="chart-time" role="img" aria-label="Evaluation time in seconds. LeWM plus CEM: TwoRoom 224.78, PushT 198.92, Reacher 326.01, OGBench-Cube 224.62. LeFlow: 15.58, 17.42, 27.67, 50.23."></div>
+          </figure>
+          <figure class="chart-card">
+            <figcaption class="chart-title">Success rate (%)</figcaption>
+            <div class="chart" id="chart-success" role="img" aria-label="Success rate. LeWM plus CEM: TwoRoom 82.0, PushT 89.3, Reacher 68.0, OGBench-Cube 73.3. LeFlow: 100.0, 95.2, 86.8, 100.0."></div>
+          </figure>
+        </div>
+        <div class="chart-tooltip" role="tooltip" hidden></div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="results-table">
+          <caption>Planning efficiency: LeWM + CEM vs. LeFlow. Speedup is CEM time divided by mean LeFlow time.</caption>
+          <thead>
+            <tr><th scope="col">Benchmark</th><th scope="col">Method</th><th scope="col">Success (%) ↑</th><th scope="col">Eval time (s) ↓</th><th scope="col">Speedup ↑</th></tr>
+          </thead>
+          <tbody>
+            <tr class="group-start"><th scope="row" rowspan="2">TwoRoom</th><td>LeWM + CEM</td><td>82.0 ± 2.0</td><td>224.78</td><td>1.0×</td></tr>
+            <tr class="ours"><td>LeFlow</td><td><b>100.0 ± 0.0</b></td><td><b>15.58</b></td><td><b>14.4×</b></td></tr>
+            <tr class="group-start"><th scope="row" rowspan="2">PushT</th><td>LeWM + CEM</td><td>89.3 ± 6.4</td><td>198.92</td><td>1.0×</td></tr>
+            <tr class="ours"><td>LeFlow</td><td><b>95.2 ± 3.0</b></td><td><b>17.42</b></td><td><b>11.4×</b></td></tr>
+            <tr class="group-start"><th scope="row" rowspan="2">Reacher</th><td>LeWM + CEM</td><td>68.0 ± 9.2</td><td>326.01</td><td>1.0×</td></tr>
+            <tr class="ours"><td>LeFlow</td><td><b>86.8 ± 4.8</b></td><td><b>27.67</b></td><td><b>11.8×</b></td></tr>
+            <tr class="group-start"><th scope="row" rowspan="2">OGBench-Cube</th><td>LeWM + CEM</td><td>73.3 ± 9.0</td><td>224.62</td><td>1.0×</td></tr>
+            <tr class="ours"><td>LeFlow</td><td><b>100.0 ± 0.0</b></td><td><b>50.23</b></td><td><b>4.5×</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="results">
+    <div class="container">
+      <h2>Main results</h2>
+      <p class="section-intro">Success rate (%) on four goal-conditioned pixel-control benchmarks. Best per column in bold.</p>
+
+      <div class="table-wrap">
+        <table class="results-table">
+          <caption>
+            Baseline numbers are as reported by Maes et al. (LeWM); “–” marks benchmarks a baseline does not report.
+            LeWM-based planners are mean ± std; LeFlow is mean ± std over five evaluation runs (seeds 42–46), H = 5, 50 episodes.
+          </caption>
+          <thead>
+            <tr><th scope="col">Method</th><th scope="col">TwoRoom</th><th scope="col">PushT</th><th scope="col">Reacher</th><th scope="col">OGBench-Cube</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Random</th><td>0.0</td><td>2.0</td><td>10.0</td><td>48.0</td></tr>
+            <tr><th scope="row">GCBC</th><td>100.0</td><td>75.0</td><td>–</td><td>84.0</td></tr>
+            <tr><th scope="row">GCIVL</th><td>100.0</td><td>33.0</td><td>–</td><td>56.0</td></tr>
+            <tr><th scope="row">GCIQL</th><td>100.0</td><td>20.0</td><td>–</td><td>64.0</td></tr>
+            <tr><th scope="row">PLDM</th><td>97.0</td><td>78.0</td><td>78.0</td><td>65.0</td></tr>
+            <tr><th scope="row">DINO-WM</th><td>100.0</td><td>74.0</td><td>79.0</td><td>86.0</td></tr>
+            <tr class="subhead"><th scope="rowgroup" colspan="5">LeWM-based planners</th></tr>
+            <tr><th scope="row">CEM</th><td>82.0 ± 2.0</td><td>89.3 ± 6.4</td><td>68.0 ± 9.2</td><td>73.3 ± 9.0</td></tr>
+            <tr><th scope="row">iCEM</th><td>88.0 ± 2.0</td><td>84.7 ± 3.1</td><td>67.3 ± 11.4</td><td>76.0 ± 7.2</td></tr>
+            <tr><th scope="row">MPPI</th><td>71.3 ± 6.4</td><td>60.7 ± 4.2</td><td>42.7 ± 4.6</td><td>49.3 ± 9.5</td></tr>
+            <tr class="ours"><th scope="row">LeFlow (ours)</th><td><b>100.0 ± 0.0</b></td><td><b>95.2 ± 3.0</b></td><td><b>86.8 ± 4.8</b></td><td><b>100.0 ± 0.0</b></td></tr>
+            <tr class="muted-row"><th scope="row">LeFlow, held-out episodes</th><td>100.0 ± 0.0</td><td>97.2 ± 1.1</td><td>86.0 ± 5.7</td><td>100.0 ± 0.0</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="table-note">
+        <em>Held-out:</em> the planner is retrained on 80% of episodes and evaluated only on start–goal queries from the
+        unseen 20%, showing that the latent trajectory prior does not just memorize training configurations.
+      </p>
+
+      <h3 class="subsection-title">Ablations</h3>
+      <p class="section-intro small">PushT and Reacher only; TwoRoom and OGBench-Cube are saturated (≥ 99.5% for every variant). 200 episodes.</p>
+      <div class="ablation-grid">
+        <div class="ablation">
+          <h4>Plan in latent space, generatively</h4>
+          <table class="results-table compact">
+            <thead><tr><th scope="col">Planner</th><th scope="col">PushT</th><th scope="col">Reacher</th></tr></thead>
+            <tbody>
+              <tr class="ours"><th scope="row">LeFlow</th><td><b>96.5</b></td><td><b>87.5</b></td></tr>
+              <tr><th scope="row">Action-Flow</th><td>93.5</td><td>83.0</td></tr>
+              <tr><th scope="row">Det.-Latent</th><td>95.5</td><td>83.0</td></tr>
+            </tbody>
+          </table>
+          <p>Generating action chunks directly (Action-Flow) or regressing one deterministic latent path (Det.-Latent) both lose to LeFlow.</p>
+        </div>
+        <div class="ablation">
+          <h4>Rollout reranking</h4>
+          <table class="results-table compact">
+            <thead><tr><th scope="col">Variant</th><th scope="col">PushT</th><th scope="col">Reacher</th></tr></thead>
+            <tbody>
+              <tr class="ours"><th scope="row">Full rerank</th><td><b>96.5</b></td><td><b>87.5</b></td></tr>
+              <tr><th scope="row">No rerank</th><td>94.0</td><td>77.0</td></tr>
+            </tbody>
+          </table>
+          <p>Scoring candidates by the frozen world model's rollout adds +10.5 points on Reacher.</p>
+        </div>
+        <div class="ablation">
+          <h4>Consistency weight <span class="math">$\lambda_{\text{cons}}$</span></h4>
+          <table class="results-table compact">
+            <thead><tr><th scope="col"><span class="math">$\lambda_{\text{cons}}$</span></th><th scope="col">PushT</th><th scope="col">Reacher</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">0.0</th><td><b>96.5</b></td><td>85.5</td></tr>
+              <tr class="ours"><th scope="row">0.1 (default)</th><td><b>96.5</b></td><td><b>87.5</b></td></tr>
+              <tr><th scope="row">1.0</th><td>95.0</td><td>84.5</td></tr>
+            </tbody>
+          </table>
+          <p>Stable across weights; a small weight gives a consistent gain on Reacher, a large one hurts diversity.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section evaluation-section" id="qualitative">
+    <div class="container">
+      <h2>LeFlow rollouts</h2>
+      <p class="section-intro">One successful episode per benchmark, from the start observation (left) to goal achievement (right).</p>
+
+      <div class="tabs" role="tablist" aria-label="Benchmark">
+        <button role="tab" aria-selected="true" aria-controls="qual-panel" data-row="1">TwoRoom</button>
+        <button role="tab" aria-selected="false" aria-controls="qual-panel" data-row="2">PushT</button>
+        <button role="tab" aria-selected="false" aria-controls="qual-panel" data-row="3">Reacher</button>
+        <button role="tab" aria-selected="false" aria-controls="qual-panel" data-row="4">OGBench-Cube</button>
+      </div>
+      <figure class="qual-panel" id="qual-panel" role="tabpanel">
+        <img id="qual-image" src="./assets/qual_row1.jpg" alt="TwoRoom rollout: the red agent moves from the left room toward the doorway in the wall." width="2400" height="470">
+        <div class="qual-steps" aria-hidden="true"><span>Start</span><span></span><span></span><span></span><span>Goal reached</span></div>
+        <figcaption id="qual-caption"></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" id="citation">
+    <div class="reading-container">
+      <h2>BibTeX</h2>
+      <div class="bibtex">
+        <button class="copy-button" type="button" aria-label="Copy BibTeX">Copy</button>
+        <pre><code id="bibtex-code">@article{huang2026leflow,
+  title   = {LeFlow: Generative Latent Flow Planning for World Models},
+  author  = {Huang, Hsiang-Wei and Shangguan, Jianxu and Lu, Junbin and Hwang, Jenq-Neng},
+  journal = {arXiv preprint arXiv:2608.24855},
+  year    = {2026}
+}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      Page design adapted from the <a href="https://kszpxxzmc.github.io/WorldRecon-website/">WorldRecon</a> project page.
+    </div>
+  </footer>
+
+  <dialog class="lightbox" id="lightbox" aria-label="Enlarged figure">
+    <button class="lightbox-close" type="button" aria-label="Close">×</button>
+    <img alt="">
+  </dialog>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <script defer src="./main.js"></script>
+</body>
+</html>
